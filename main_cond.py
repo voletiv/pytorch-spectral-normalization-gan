@@ -7,8 +7,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import ExponentialLR
 from torchvision import datasets, transforms
+from torchvision.utils import save_image
 from torch.autograd import Variable
-import model_resnet
+import model_resnet_cond
 import model
 
 import numpy as np
@@ -27,6 +28,7 @@ parser.add_argument('--out_dir', type=str, default='./SNGAN')
 parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
 parser.add_argument('--samples_dir', type=str, default='samples')
 parser.add_argument('--data_dir', type=str, default='../data/')
+parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
 
 parser.add_argument('--model', type=str, default='resnet')
 
@@ -48,11 +50,11 @@ disc_iters = 5
 
 # discriminator = torch.nn.DataParallel(Discriminator()).cuda() # TODO: try out multi-gpu training
 if args.model == 'resnet':
-    discriminator = model_resnet.Discriminator().cuda()
-    generator = model_resnet.Generator(Z_dim).cuda()
-else:
-    discriminator = model.Discriminator().cuda()
-    generator = model.Generator(Z_dim).cuda()
+    discriminator = model_resnet_cond.Discriminator(num_classes=10).cuda()
+    generator = model_resnet_cond.Generator(Z_dim, norm_type=args.norm, num_classes=10).cuda()
+# else:
+#     discriminator = model.Discriminator().cuda()
+#     generator = model.Generator(Z_dim).cuda()
 
 # because the spectral normalization module creates parameters that don't require gradients (u and v), we don't want to 
 # optimize these using sgd. We only let the optimizer operate on parameters that _do_ require gradients
@@ -68,6 +70,7 @@ def train(epoch):
     for batch_idx, (data, target) in enumerate(loader):
         if data.size()[0] != args.batch_size:
             continue
+
         data, target = Variable(data.cuda()), Variable(target.cuda())
 
         # update discriminator
@@ -75,13 +78,14 @@ def train(epoch):
             z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
             optim_disc.zero_grad()
             optim_gen.zero_grad()
+            # import pdb; pdb.set_trace()
             if args.loss == 'hinge':
-                disc_loss = nn.ReLU()(1.0 - discriminator(data)).mean() + nn.ReLU()(1.0 + discriminator(generator(z))).mean()
+                disc_loss = nn.ReLU()(1.0 - discriminator(data, target)).mean() + nn.ReLU()(1.0 + discriminator(generator(z, target), target)).mean()
             elif args.loss == 'wasserstein':
-                disc_loss = -discriminator(data).mean() + discriminator(generator(z)).mean()
+                disc_loss = -discriminator(data, target).mean() + discriminator(generator(z, target), target).mean()
             else:
-                disc_loss = nn.BCEWithLogitsLoss()(discriminator(data), Variable(torch.ones(args.batch_size, 1).cuda())) + \
-                    nn.BCEWithLogitsLoss()(discriminator(generator(z)), Variable(torch.zeros(args.batch_size, 1).cuda()))
+                disc_loss = nn.BCEWithLogitsLoss()(discriminator(data, target), Variable(torch.ones(args.batch_size, 1).cuda())) + \
+                    nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.zeros(args.batch_size, 1).cuda()))
             disc_loss.backward()
             optim_disc.step()
 
@@ -91,46 +95,39 @@ def train(epoch):
         optim_disc.zero_grad()
         optim_gen.zero_grad()
         if args.loss == 'hinge' or args.loss == 'wasserstein':
-            gen_loss = -discriminator(generator(z)).mean()
+            gen_loss = -discriminator(generator(z, target), target).mean()
         else:
-            gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z)), Variable(torch.ones(args.batch_size, 1).cuda()))
+            gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.ones(args.batch_size, 1).cuda()))
         gen_loss.backward()
         optim_gen.step()
 
         if batch_idx % 10 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
-            print(f'[{curr_time_str}] Epoch {epoch} batch {batch_idx} disc loss {disc_loss.item():.04f} gen loss {gen_loss.item():.04f}')
+            print(f'[{curr_time_str}] Epoch {epoch} batch {batch_idx} disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
     scheduler_d.step()
     scheduler_g.step()
 
 fixed_z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
+fixed_labels = torch.from_numpy(np.tile(np.arange(10), args.batch_size//10 + 1)[:args.batch_size]).cuda()
 
 
 def evaluate(epoch):
 
-    samples = generator(fixed_z).cpu().data.numpy()[:64]
+    generator.eval()
+    samples = generator(fixed_z, fixed_labels).detach().cpu().data[:60]
+    generator.train()
 
-    fig = plt.figure(figsize=(8, 8))
-    gs = gridspec.GridSpec(8, 8)
-    gs.update(wspace=0.05, hspace=0.05)
-
-    for i, sample in enumerate(samples):
-        ax = plt.subplot(gs[i])
-        plt.axis('off')
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
-        ax.set_aspect('equal')
-        plt.imshow(sample.transpose((1,2,0)) * 0.5 + 0.5)
-
-    plt.savefig(os.path.join(args.samples_dir, '{}.png'.format(str(epoch).zfill(3))), bbox_inches='tight')
-    plt.close(fig)
+    save_image(samples, os.path.join(args.samples_dir, f'{epoch:03d}.png'), nrow=10)
 
 os.makedirs(args.checkpoint_dir, exist_ok=True)
 os.makedirs(args.samples_dir, exist_ok=True)
 
+evaluate(0)
+torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(0)))
+torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(0)))
+
 for epoch in range(2000):
     train(epoch)
     evaluate(epoch)
-    torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch)))
-    torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch)))
-
+    torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch+1)))
+    torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch+1)))
