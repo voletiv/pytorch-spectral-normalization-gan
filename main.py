@@ -21,14 +21,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--lr', type=float, default=2e-4)
 parser.add_argument('--loss', type=str, default='hinge')
+parser.add_argument('--out_dir', type=str, default='./SNGAN')
 parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
+parser.add_argument('--samples_dir', type=str, default='samples')
+parser.add_argument('--data_dir', type=str, default='../data/')
 
 parser.add_argument('--model', type=str, default='resnet')
 
 args = parser.parse_args()
 
+args.checkpoint_dir = os.path.join(args.out_dir, args.checkpoint_dir)
+args.samples_dir = os.path.join(args.out_dir, args.samples_dir)
+
 loader = torch.utils.data.DataLoader(
-    datasets.CIFAR10('../data/', train=True, download=True,
+    datasets.CIFAR10(args.data_dir, train=True, download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])),
@@ -89,16 +95,17 @@ def train(epoch):
         gen_loss.backward()
         optim_gen.step()
 
-        if batch_idx % 100 == 0:
-            print('disc loss', disc_loss.data[0], 'gen loss', gen_loss.data[0])
+        if batch_idx % 10 == 0:
+            print(f'Epoch {epoch} batch {batch_idx} disc loss', disc_loss.item(), 'gen loss', gen_loss.item())
     scheduler_d.step()
     scheduler_g.step()
 
 fixed_z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
+
+
 def evaluate(epoch):
 
     samples = generator(fixed_z).cpu().data.numpy()[:64]
-
 
     fig = plt.figure(figsize=(8, 8))
     gs = gridspec.GridSpec(8, 8)
@@ -112,13 +119,11 @@ def evaluate(epoch):
         ax.set_aspect('equal')
         plt.imshow(sample.transpose((1,2,0)) * 0.5 + 0.5)
 
-    if not os.path.exists('out/'):
-        os.makedirs('out/')
-
-    plt.savefig('out/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
+    plt.savefig(os.path.join(args.samples_dir, '{}.png'.format(str(epoch).zfill(3))), bbox_inches='tight')
     plt.close(fig)
 
 os.makedirs(args.checkpoint_dir, exist_ok=True)
+os.makedirs(args.samples_dir, exist_ok=True)
 
 for epoch in range(2000):
     train(epoch)

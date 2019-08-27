@@ -15,8 +15,8 @@ class ResBlockGenerator(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
-        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
-        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
+        nn.init.xavier_uniform_(self.conv1.weight.data, 1.)
+        nn.init.xavier_uniform_(self.conv2.weight.data, 1.)
 
         self.model = nn.Sequential(
             nn.BatchNorm2d(in_channels),
@@ -42,8 +42,8 @@ class ResBlockDiscriminator(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
-        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
-        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
+        nn.init.xavier_uniform_(self.conv1.weight.data, 1.)
+        nn.init.xavier_uniform_(self.conv2.weight.data, 1.)
 
         if stride == 1:
             self.model = nn.Sequential(
@@ -64,7 +64,7 @@ class ResBlockDiscriminator(nn.Module):
         if stride != 1:
 
             self.bypass_conv = nn.Conv2d(in_channels,out_channels, 1, 1, padding=0)
-            nn.init.xavier_uniform(self.bypass_conv.weight.data, np.sqrt(2))
+            nn.init.xavier_uniform_(self.bypass_conv.weight.data, np.sqrt(2))
 
             self.bypass = nn.Sequential(
                 SpectralNorm(self.bypass_conv),
@@ -91,9 +91,9 @@ class FirstResBlockDiscriminator(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
         self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
-        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
-        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
-        nn.init.xavier_uniform(self.bypass_conv.weight.data, np.sqrt(2))
+        nn.init.xavier_uniform_(self.conv1.weight.data, 1.)
+        nn.init.xavier_uniform_(self.conv2.weight.data, 1.)
+        nn.init.xavier_uniform_(self.bypass_conv.weight.data, np.sqrt(2))
 
         # we don't want to apply ReLU activation to raw image before convolution transformation.
         self.model = nn.Sequential(
@@ -120,8 +120,8 @@ class Generator(nn.Module):
 
         self.dense = nn.Linear(self.z_dim, 4 * 4 * GEN_SIZE)
         self.final = nn.Conv2d(GEN_SIZE, channels, 3, stride=1, padding=1)
-        nn.init.xavier_uniform(self.dense.weight.data, 1.)
-        nn.init.xavier_uniform(self.final.weight.data, 1.)
+        nn.init.xavier_uniform_(self.dense.weight.data, 1.)
+        nn.init.xavier_uniform_(self.final.weight.data, 1.)
 
         self.model = nn.Sequential(
             ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2),
@@ -148,7 +148,7 @@ class Discriminator(nn.Module):
                 nn.AvgPool2d(8),
             )
         self.fc = nn.Linear(DISC_SIZE, 1)
-        nn.init.xavier_uniform(self.fc.weight.data, 1.)
+        nn.init.xavier_uniform_(self.fc.weight.data, 1.)
         self.fc = SpectralNorm(self.fc)
 
     def forward(self, x):
