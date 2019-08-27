@@ -114,7 +114,7 @@ fixed_labels = torch.from_numpy(np.tile(np.arange(10), args.batch_size//10 + 1)[
 def evaluate(epoch):
 
     generator.eval()
-    samples = generator(fixed_z, fixed_labels).detach().cpu().data[:60]
+    samples = generator(fixed_z, fixed_labels).detach().cpu().add(1.).mul(0.5).data[:60]
     generator.train()
 
     save_image(samples, os.path.join(args.samples_dir, f'{epoch:03d}.png'), nrow=10)

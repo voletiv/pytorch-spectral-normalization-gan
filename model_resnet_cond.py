@@ -68,8 +68,8 @@ class ResBlockGenerator(nn.Module):
             self.norm1 = ConditionalBatchNorm(in_channels, num_classes, emb_or_lin='emb')
             self.norm2 = ConditionalBatchNorm(out_channels, num_classes, emb_or_lin='emb')
         elif norm_type == "group":
-            self.norm1 = ConditionalGroupNorm(in_channels, num_classes, emb_or_lin='emb')
-            self.norm2 = ConditionalGroupNorm(out_channels, num_classes, emb_or_lin='emb')
+            self.norm1 = ConditionalGroupNorm(4, in_channels, num_classes, emb_or_lin='emb')
+            self.norm2 = ConditionalGroupNorm(4, out_channels, num_classes, emb_or_lin='emb')
 
         # self.model = nn.Sequential(
         #     nn.BatchNorm2d(in_channels),

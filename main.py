@@ -40,7 +40,7 @@ loader = torch.utils.data.DataLoader(
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])),
-        batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=True)
+        batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
 
 Z_dim = 128
 #number of updates to discriminator for every update to generator 
@@ -134,3 +134,5 @@ for epoch in range(2000):
     torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch)))
     torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch)))
 
+# python main_cond.py --model resnet --loss hinge --data_dir /home/voletivi/scratch/Datasets/CIFAR10 --out_dir /home/voletivi/scratch/sngan_christiancosgrove_cifar10/CBN2
+# python main_cond.py --model resnet --loss hinge --data_dir /home/voletivi/scratch/Datasets/CIFAR10 --out_dir /home/voletivi/scratch/sngan_christiancosgrove_cifar10/CGN --norm group
