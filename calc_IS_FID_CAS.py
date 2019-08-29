@@ -1,9 +1,15 @@
 # https://github.com/voletiv/inception-score-pytorch
 # https://github.com/voletiv/pytorch-fid
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 import glob
 import imageio
 import numpy as np
 import os
+import subprocess
+import time
 import torch
 import tqdm
 
@@ -18,8 +24,10 @@ from scipy import linalg
 from scipy.misc import imread
 from torch.nn.functional import adaptive_avg_pool2d
 from torchvision import models
+from torch.nn.functional import interpolate
 
 from torch import nn
+import torch.optim as optim
 from torch.autograd import Variable
 import torch.utils.data
 
@@ -31,9 +39,11 @@ from scipy.stats import entropy
 
 import model_resnet_cond
 
+# from calc_IS_FID import *; run_me('batch', '/home/voletivi/scratch/sngan_christiancosgrove_cifar10/CBN2/checkpoints', '/home/voletivi/scratch/Datasets/CIFAR10_FID_ref_mean_std_per_class.npz', '/home/voletivi/scratch/Datasets/CIFAR10')
 
-def run_me(checkpoints_dir, FID_ref_per_class_npz_path, norm_type='batch',
-            n_samples_per_class=256, Z_dim=128, num_classes=10):
+
+def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_path,
+            n_samples_per_class=6000, Z_dim=128, num_classes=10):
     # FID
     a = np.load(FID_ref_per_class_npz_path)
     FID_ref_m = a['mean']
@@ -48,6 +58,7 @@ def run_me(checkpoints_dir, FID_ref_per_class_npz_path, norm_type='batch',
     # is_npz_save_path = os.path.join(checkpoints_dir, '../is.npz')
     # fid_npz_save_path = os.path.join(checkpoints_dir, '../fid.npz')
     save_path = os.path.realpath(os.path.join(checkpoints_dir, '..'))
+    CAS_npz_path = os.path.realpath(os.path.join(checkpoints_dir, '..', 'CAS_acc.npz'))
     # For each epoch
     for epoch in epochs:
         print("Epoch", epoch)
@@ -58,7 +69,10 @@ def run_me(checkpoints_dir, FID_ref_per_class_npz_path, norm_type='batch',
         # Generate images
         images_per_class = generate_n_samples_per_class(G, n_samples_per_class=256, save=False, num_of_classes=num_classes)
         # Calc
-        calc_IS_FID_and_save(G, images_per_class, epoch, save_path, gen_samples_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_of_classes)
+        calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
+        # Calc CAS
+        print("Calculating CAS")
+        CAS(CAS_npz_path, epoch, images_per_class, cifar10_data_path)
         # # Delete gen_samples dir
         # subprocess.run("nvidia-smi")
         # print("Deleting gen_samples_dir")
@@ -102,6 +116,155 @@ def generate_n_samples_per_class(G, n_samples_per_class=256,
     G.train()
     if not save:
         return images_per_class
+
+
+def CAS(npz_save_path, epoch, images_per_class, cifar10_data_path, batch_size=200):
+    if os.path.exists(npz_save_path):
+        a = np.load(npz_save_path)
+        ckpts, CAS_acc = list(a['ckpts']), list(a['acc'])
+    else:
+        ckpts, CAS_acc = [], []
+    # Append to ckpts
+    ckpts.append(epoch)
+    # Classifier
+    train_dataset = torch.utils.data.TensorDataset(torch.cat(images_per_class), torch.tensor([[i]*len(images_per_class[i]) for i in range(len(images_per_class))]).view(-1))
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+    valid_dataset = dset.CIFAR10(root=cifar10_data_path, train=False, download=True, transform=transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x*2 - 1)]))
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
+    dataloaders = {"train": train_loader, "val": valid_loader}
+    save_dir = os.path.join(os.path.dirname(npz_save_path), f'cifar10_classifier_resnet18_bs200_ckpt_{epoch:07d}')
+    best_acc = CAS_train_model(dataloaders, save_dir=save_dir, num_iters=2000, val_every_n_iters=50)
+    del train_dataset, valid_dataset, dataloaders
+    CAS_acc.append(best_acc)
+    np.savez(npz_save_path, ckpts=ckpts, acc=CAS_acc)
+
+
+# https://www.kaggle.com/gntoni/using-pytorch-resnet
+def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.device('cuda'),
+                    criterion=nn.CrossEntropyLoss(), lr=0.0001, num_iters=100000, val_every_n_iters=1):
+    def get_samples(data_iter, device, dataloader, scale_factor=224./32.):
+        try:
+            inputs, labels = next(data_iter)
+        except:
+            data_iter = iter(dataloader)
+            inputs, labels = next(data_iter)
+        # Then
+        inputs, labels = interpolate(inputs, scale_factor=scale_factor).to(device), labels.to(device)
+        return inputs, labels, data_iter
+
+    def make_plot(save_dir, train_losses, train_accs, val_losses, val_accs, val_every_n_iters):
+        # Plot
+        iters_x = np.arange(len(train_losses))*val_every_n_iters
+        fig = plt.figure(figsize=(10, 20))
+        plt.subplot(211)
+        plt.plot(iters_x, np.zeros(iters_x.shape), 'k--', alpha=0.5)
+        plt.plot(iters_x, train_losses, color='C1', alpha=0.7, label='train_loss')
+        plt.plot(iters_x, val_losses, color='C2', alpha=0.7, label='val_loss')
+        plt.legend()
+        if max(train_losses) > 2 or max(val_losses) > 2:
+            plt.yscale("symlog")
+        plt.title("Loss")
+        plt.xlabel("Iterations")
+        plt.subplot(212)
+        plt.plot(iters_x, train_accs, color='C1', alpha=0.7, label='train_acc')
+        plt.plot(iters_x, val_accs, color='C2', alpha=0.7, label='val_acc')
+        plt.legend()
+        plt.ylim([0, 1])
+        plt.title("Accuracy")
+        plt.xlabel("Iterations")
+        plt.savefig(os.path.join(save_dir, "plots.png"), bbox_inches='tight', pad_inches=0.5)
+        plt.clf()
+        plt.close()
+
+    model = models.resnet18(pretrained=False, num_classes=10).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    # Copy
+    # shutil.copy(os.path.realpath('cifar10_classifier.py'), save_dir)
+    try:
+        since = time.time()
+        best_model_wts = model.state_dict()
+        best_acc = 0.0
+        train_data_iter = iter(dataloaders['train'])
+        val_data_iter = iter(dataloaders['val'])
+        running_loss = []
+        running_acc = []
+        losses = []
+        accs = []
+        val_losses = []
+        val_accs = []
+        # For epochs
+        model.train(True)
+        for iter_num in range(num_iters):
+            # print('-' * 10)
+            # TRAIN
+            inputs, labels, train_data_iter = get_samples(train_data_iter, device, dataloaders['train'])
+            # zero the parameter gradients
+            optimizer.zero_grad()
+            # forward
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            # backward + optimize only if in training phase
+            loss.backward()
+            optimizer.step()
+            # statistics
+            # import pdb; pdb.set_trace()
+            running_loss.append(loss.item())
+            _, preds = torch.max(outputs, 1)
+            running_acc.append(torch.sum(preds.cpu() == labels.cpu()).float().item()/dataloaders['train'].batch_size)
+            print("Iter {}/{}".format(iter_num+1, num_iters), "; Loss", "{:.04f}".format(np.mean(running_loss)), "; Acc", "{:.04f}".format(np.mean(running_acc)))
+            del outputs, loss
+            # VAL
+            if iter_num % val_every_n_iters == 0:
+                losses.append(np.mean(running_loss))
+                accs.append(np.mean(running_acc))
+                time_elapsed = time.time() - since
+                print('{:.0f}hr {:.0f}min {:.0f}secs'.format((time_elapsed/60//24)%24, (time_elapsed//60)%60, time_elapsed%60))
+                print('TRAIN: Loss: {:.4f}; Acc {:.4f}'.format(losses[-1], accs[-1]))
+                running_loss = []
+                running_acc = []
+                # Validate
+                model.train(False)
+                running_val_losses = []
+                running_val_accs = []
+                for i in range(val_every_n_iters):
+                    inputs, labels, val_data_iter = get_samples(val_data_iter, device, dataloaders['val'])
+                    outputs = model(inputs)
+                    running_val_losses.append(criterion(outputs, labels).item())
+                    _, preds = torch.max(outputs, 1)
+                    running_val_accs.append(torch.sum(preds.cpu() == labels.cpu()).float().item()/dataloaders['val'].batch_size)
+                    del outputs
+                # Print
+                val_losses.append(np.mean(running_val_losses))
+                val_accs.append(np.mean(running_val_accs))
+                make_plot(save_dir, losses, accs, val_losses, val_accs, val_every_n_iters)
+                print('VALID: Loss: {:.4f}; Acc {:.4f}'.format(val_losses[-1], val_accs[-1]))
+                if val_accs[-1] >= best_acc:
+                    print("Best model yet...")
+                    best_acc = val_accs[-1]
+                    best_model_wts = model.state_dict()
+                    torch.save(model.state_dict(), os.path.join(save_dir, "best_model.pth"))
+                # Early stopping
+                if len(val_losses) > 10:
+                    if val_losses[-1] >= min(val_losses[-4:-1]):
+                        break
+                # Back to train
+                model.train(True)
+                # subprocess.run(['nvidia-smi'])
+    # Except
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+    # End of training
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))
+    # Print acc
+    print('Best val Acc: {:4f}'.format(best_acc))
+    # # load best model weights
+    # model.load_state_dict(best_model_wts)
+    os.rename(os.path.join(save_dir, "best_model.pth"), os.path.join(save_dir, "best_model_valAcc{:0.04f}.pth".format(best_acc)))
+    return best_acc
 
 
 def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_class=256,
@@ -182,14 +345,14 @@ def calc_fid_and_save(ckpt, images, npz_save_path, ref_m, ref_s, model=None, gpu
     # If ref_m is not given, calculate that as well
     if ref_m is None:
         print("Calc FID: calc score for BOTH!!")
-        fid, model, ref_m, ref_s = calculate_fid_given_paths([images, None], batch_size=64, gpu=gpu, dims=2048,
+        fid, model, ref_m, ref_s = calculate_fid_given_images_sets([images, None], batch_size=64, gpu=gpu, dims=2048,
                                                              model=model, return_model=True,
                                                              calc_only_for_one_path=False, return_m2s2=True, m2=None, s2=None)
         np.savez(os.path.realpath(os.path.join(os.path.dirname(npz_save_path), 'FID_ref_mean_std.npz')),
                  mean=ref_m, std=ref_s)
     # ref_m and ref_s are given, only calc inception m and std on first path (and then compare)
     else:
-        fid, model = calculate_fid_given_paths([images, None], batch_size=64, gpu=gpu, dims=2048,
+        fid, model = calculate_fid_given_images_sets([images, None], batch_size=64, gpu=gpu, dims=2048,
                                                model=model, return_model=True,
                                                calc_only_for_one_path=True, m2=ref_m, s2=ref_s, return_m2s2=False)
     # Append, save
@@ -417,15 +580,15 @@ def get_activations(images, model, batch_size=64, dims=2048,
     """
     model.eval()
 
-    if len(files) % batch_size != 0:
+    if len(images) % batch_size != 0:
         print(('Warning: number of images is not a multiple of the '
                'batch size. Some samples are going to be ignored.'))
-    if batch_size > len(files):
+    if batch_size > len(images):
         print(('Warning: batch size is bigger than the data size. '
                'Setting batch size to data size'))
-        batch_size = len(files)
+        batch_size = len(images)
 
-    n_batches = len(files) // batch_size
+    n_batches = len(images) // batch_size
     n_used_imgs = n_batches * batch_size
 
     pred_arr = np.empty((n_used_imgs, dims))
@@ -491,7 +654,7 @@ def calculate_activation_statistics(images, model, batch_size=50,
     return mu, sigma
 
 
-def calculate_fid_given_images_sets(images_sets, batch_size, gpu, dims=2048, return_only_model_m1_s1=False,
+def calculate_fid_given_images_sets(images_sets, batch_size, gpu='', dims=2048, return_only_model_m1_s1=False,
                               model=None, return_model=False,
                               calc_only_for_one_path=False, m2=None, s2=None, return_m2s2=False):
     """Calculates the FID of two paths"""
@@ -502,9 +665,9 @@ def calculate_fid_given_images_sets(images_sets, batch_size, gpu, dims=2048, ret
     gpu: '0'
     """
 
-    for p in paths:
-        if not os.path.exists(p):
-            raise RuntimeError('Invalid path: %s' % p)
+    # for p in paths:
+    #     if not os.path.exists(p):
+    #         raise RuntimeError('Invalid path: %s' % p)
 
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
 
@@ -514,13 +677,13 @@ def calculate_fid_given_images_sets(images_sets, batch_size, gpu, dims=2048, ret
     device = torch.device('cuda:' + gpu if gpu != '' else 'cpu')
     model = model.to(device)
 
-    m1, s1 = m, s = calculate_activation_statistics(images_sets[0], model, batch_size, dims, cuda)
+    m1, s1 = m, s = calculate_activation_statistics(images_sets[0], model, batch_size, dims, gpu != '')
 
     if return_only_model_m1_s1:
         return model, m1, s1
 
     if not calc_only_for_one_path:
-        m2, s2 = calculate_activation_statistics(images_sets[1], model, batch_size, dims, cuda)
+        m2, s2 = calculate_activation_statistics(images_sets[1], model, batch_size, dims, gpu != '')
 
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
 
