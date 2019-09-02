@@ -103,7 +103,7 @@ def train(epoch):
 
         if batch_idx % 10 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
-            print(f'[{curr_time_str}] Epoch {epoch} batch {batch_idx} disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
+            print(f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
     scheduler_d.step()
     scheduler_g.step()
 

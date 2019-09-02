@@ -43,7 +43,7 @@ import model_resnet_cond
 
 
 def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_path,
-            n_samples_per_class=6000, Z_dim=128, num_classes=10):
+            n_samples_per_class=6000, Z_dim=128, num_classes=10, epoch_freq=10):
     # FID
     a = np.load(FID_ref_per_class_npz_path)
     FID_ref_m = a['mean']
@@ -52,26 +52,34 @@ def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_
     G = model_resnet_cond.Generator(Z_dim, norm_type=norm_type, num_classes=num_classes).cuda()
     # Checkpoints
     ckpt_files = sorted(glob.glob(os.path.join(checkpoints_dir, "gen_*")))
-    epochs = [int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]
+    # epochs = np.array(sorted([int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]))[::epoch_freq]
+    epochs = [0, 5, 10, 15, 20, 30, 40, 50]
     file_prefix = os.path.join(os.path.dirname(ckpt_files[0]), os.path.basename(ckpt_files[0]).split('_')[0])
     # gen_samples_path = os.path.join(checkpoints_dir, '../gen_samples')
     # is_npz_save_path = os.path.join(checkpoints_dir, '../is.npz')
     # fid_npz_save_path = os.path.join(checkpoints_dir, '../fid.npz')
     save_path = os.path.realpath(os.path.join(checkpoints_dir, '..'))
     CAS_npz_path = os.path.realpath(os.path.join(checkpoints_dir, '..', 'CAS_acc.npz'))
+    if os.path.exists(CAS_npz_path):
+        a = np.load(CAS_npz_path)
+        ckpts, CAS_acc = list(a['ckpts']), list(a['acc'])
+    else:
+        ckpts, CAS_acc = [], []
     # For each epoch
     for epoch in epochs:
         print("Epoch", epoch)
+        if epoch in ckpts:
+            continue
         # Load
         pth_filename = file_prefix + '_' + str(epoch)
         G.load_state_dict(torch.load(pth_filename))
         print("Generating", n_samples_per_class, "samples per class, for", num_classes, "classes")
         # Generate images
-        images_per_class = generate_n_samples_per_class(G, n_samples_per_class=256, save=False, num_of_classes=num_classes)
+        images_per_class = generate_n_samples_per_class(G, n_samples_per_class=n_samples_per_class, save=False, num_of_classes=num_classes)
         # Calc
-        calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
-        # Calc CAS
-        print("Calculating CAS")
+        # calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
+        # # Calc CAS
+        # print("Calculating CAS")
         CAS(CAS_npz_path, epoch, images_per_class, cifar10_data_path)
         # # Delete gen_samples dir
         # subprocess.run("nvidia-smi")
@@ -125,6 +133,8 @@ def CAS(npz_save_path, epoch, images_per_class, cifar10_data_path, batch_size=20
     else:
         ckpts, CAS_acc = [], []
     # Append to ckpts
+    if epoch in ckpts:
+            return
     ckpts.append(epoch)
     # Classifier
     train_dataset = torch.utils.data.TensorDataset(torch.cat(images_per_class), torch.tensor([[i]*len(images_per_class[i]) for i in range(len(images_per_class))]).view(-1))
@@ -196,18 +206,29 @@ def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.d
         val_accs = []
         # For epochs
         model.train(True)
+        print("About to train")
         for iter_num in range(num_iters):
             # print('-' * 10)
             # TRAIN
             inputs, labels, train_data_iter = get_samples(train_data_iter, device, dataloaders['train'])
+            if iter_num == 0:
+                print("got the samples")
             # zero the parameter gradients
             optimizer.zero_grad()
             # forward
             outputs = model(inputs)
+            if iter_num == 0:
+                print("got the model output")
             loss = criterion(outputs, labels)
+            if iter_num == 0:
+                print("got the loss")
             # backward + optimize only if in training phase
             loss.backward()
+            if iter_num == 0:
+                print("did backward")
             optimizer.step()
+            if iter_num == 0:
+                print("did optimizer step")
             # statistics
             # import pdb; pdb.set_trace()
             running_loss.append(loss.item())
@@ -228,16 +249,21 @@ def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.d
                 model.train(False)
                 running_val_losses = []
                 running_val_accs = []
-                for i in range(val_every_n_iters):
+                print("About to validate!")
+                val_data_iter = iter(dataloaders['val'])
+                for i in tqdm.tqdm(range(len(val_data_iter))):
                     inputs, labels, val_data_iter = get_samples(val_data_iter, device, dataloaders['val'])
                     outputs = model(inputs)
                     running_val_losses.append(criterion(outputs, labels).item())
                     _, preds = torch.max(outputs, 1)
-                    running_val_accs.append(torch.sum(preds.cpu() == labels.cpu()).float().item()/dataloaders['val'].batch_size)
-                    del outputs
+                    preds = preds.cpu()
+                    labels = labels.cpu()
+                    running_val_accs.append(torch.sum(preds == labels).float().item()/len(inputs))
+                    del preds, outputs
                 # Print
                 val_losses.append(np.mean(running_val_losses))
                 val_accs.append(np.mean(running_val_accs))
+                print("making plot")
                 make_plot(save_dir, losses, accs, val_losses, val_accs, val_every_n_iters)
                 print('VALID: Loss: {:.4f}; Acc {:.4f}'.format(val_losses[-1], val_accs[-1]))
                 if val_accs[-1] >= best_acc:
@@ -276,17 +302,17 @@ def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_cla
     #                              G_args=G_args, separate_class_dir=True)
     # Calculate inception score per class
     print("\nCalculating IS\n")
-    subprocess.run("nvidia-smi")
+    # subprocess.run("nvidia-smi")
     for class_label in tqdm.tqdm(range(num_of_classes)):
         print("\n Calculating IS class", class_label, "\n")
         inception_model = calc_inception_score_and_save(ckpt, images_per_class[class_label],
                                                         os.path.join(save_path, 'IS_class{:02d}.npz'.format(class_label)),
                                                         inception_model, IS_gpu)
-        subprocess.run("nvidia-smi")
+        # subprocess.run("nvidia-smi")
     del inception_model
     # Calculate FID per class
     print("\nCalculating FID\n")
-    subprocess.run("nvidia-smi")
+    # subprocess.run("nvidia-smi")
     if ref_m_per_class is None:
         print("Will save FID_ref_mean_std_per_class")
         save_ref = True
@@ -305,7 +331,7 @@ def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_cla
                                                     os.path.join(save_path, 'FID_class{:02d}.npz'.format(class_label)),
                                                     ref_m_per_class[class_label], ref_s_per_class[class_label],
                                                     fid_model, FID_gpu)
-        subprocess.run("nvidia-smi")
+        # subprocess.run("nvidia-smi")
     del fid_model
     if save_ref:
         print("Saving FID ref_m_per_class, ref_s_per_class")
