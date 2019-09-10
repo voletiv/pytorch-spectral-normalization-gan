@@ -53,7 +53,7 @@ def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_
     # Checkpoints
     ckpt_files = sorted(glob.glob(os.path.join(checkpoints_dir, "gen_*")))
     # epochs = np.array(sorted([int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]))[::epoch_freq]
-    epochs = [0, 5, 10, 15, 20, 30, 40, 50]
+    epochs = [1, 6, 11, 15, 20, 30, 40, 50]
     file_prefix = os.path.join(os.path.dirname(ckpt_files[0]), os.path.basename(ckpt_files[0]).split('_')[0])
     # gen_samples_path = os.path.join(checkpoints_dir, '../gen_samples')
     # is_npz_save_path = os.path.join(checkpoints_dir, '../is.npz')
@@ -68,19 +68,19 @@ def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_
     # For each epoch
     for epoch in epochs:
         print("Epoch", epoch)
-        if epoch in ckpts:
-            continue
+        # if epoch in ckpts:
+        #     continue
         # Load
         pth_filename = file_prefix + '_' + str(epoch)
         G.load_state_dict(torch.load(pth_filename))
         print("Generating", n_samples_per_class, "samples per class, for", num_classes, "classes")
         # Generate images
         images_per_class = generate_n_samples_per_class(G, n_samples_per_class=n_samples_per_class, save=False, num_of_classes=num_classes)
-        # Calc
-        # calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
-        # # Calc CAS
+        # Calc IS, FID
+        calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
+        # Calc CAS
         # print("Calculating CAS")
-        CAS(CAS_npz_path, epoch, images_per_class, cifar10_data_path)
+        # CAS(CAS_npz_path, epoch, images_per_class, cifar10_data_path)
         # # Delete gen_samples dir
         # subprocess.run("nvidia-smi")
         # print("Deleting gen_samples_dir")

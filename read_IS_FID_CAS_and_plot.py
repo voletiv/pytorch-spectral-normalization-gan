@@ -35,10 +35,12 @@ dirs_CBN_bs16 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CBN_
 dirs_CGN_bs16 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CGN_bs16']
 dirs_CBN_bs8 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CBN_bs8']
 dirs_CGN_bs8 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CGN_bs8']
+dirs_CBN_bs4 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CBN_bs4']
+dirs_CGN_bs4 = ['/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10/CGN_bs4']
 
 # dirs = [dirs_CBN, dirs_CLN, dirs_CGN, dirs_CIN]
-dirs = [dirs_CBN_bs64, dirs_CGN_bs64, dirs_CBN_bs32, dirs_CGN_bs32, dirs_CBN_bs16, dirs_CGN_bs16, dirs_CBN_bs8, dirs_CGN_bs8]
-labels = ['CBN_bs64', 'CGN_bs64', 'CBN_bs32', 'CGN_bs32', 'CBN_bs16', 'CGN_bs16', 'CBN_bs8', 'CGN_bs8', ]
+dirs = [dirs_CBN_bs64, dirs_CGN_bs64, dirs_CBN_bs32, dirs_CGN_bs32, dirs_CBN_bs16, dirs_CGN_bs16, dirs_CBN_bs8, dirs_CGN_bs8, dirs_CBN_bs4, dirs_CGN_bs4]
+labels = ['CBN_bs64', 'CGN_bs64', 'CBN_bs32', 'CGN_bs32', 'CBN_bs16', 'CGN_bs16', 'CBN_bs8', 'CGN_bs8', 'CBN_bs4', 'CGN_bs4']
 
 # CAS
 CAS_CBN_ckpts = []
@@ -169,13 +171,23 @@ plt.close()
 # plt.figure(figsize=(14, 6))
 # l = min([len(iss[label][0]['ckpts']) for label in labels])
 ckpts = [0, 5, 10, 15, 20, 30, 40, 50]
+ckpts_bs4 = [6, 11, 15, 20, 30, 40, 50]
 l = len(ckpts)
 for k, label in enumerate(labels):
     is_m = []
+    if 'bs4' in label:
+        cs = ckpts_bs4
+    else:
+        cs = ckpts
     for class_label in tqdm(range(10)):
         # plt.subplot(2, 5, class_label+1)
         # ckpts = sorted(iss[label][class_label]['ckpts'])[:l]
-        is_means = [iss[label][class_label]['mean'][ckpt] for ckpt in ckpts]
+        if 'bs4' in label:
+            is_means = [iss[labels[k-2]][class_label]['mean'][0]]
+        else:
+            is_means = []
+        is_means += [iss[label][class_label]['mean'][ckpt] for ckpt in cs]
+        # import pdb; pdb.set_trace()
         is_m.append([np.mean(i) for i in is_means])
     # Mean, std across classes
     is_mean = np.mean(is_m, axis=0)
@@ -192,7 +204,7 @@ plt.ylabel('IS - mean & std across classes')
 plt.xlabel("Epochs")
 
 # Save# plt.savefig(os.path.realpath(os.path.join('/scratch/voletivi/sagan', 'CIFAR10_FIDs_per_class.png')), bbox_inches='tight', pad_inches=0.25)
-plt.savefig(os.path.realpath(os.path.join('/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10', 'CIFAR10_ISs_meanAcrossClasses_bs.png')), bbox_inches='tight', pad_inches=0.25)
+plt.savefig(os.path.realpath(os.path.join('/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10', 'CIFAR10_ISs_meanAcrossClasses_bs_wthBS4.png')), bbox_inches='tight', pad_inches=0.25)
 plt.clf()
 plt.close()
 
@@ -234,13 +246,20 @@ plt.close()
 # l = min([len(fids[label][0]['ckpts']) for label in labels])
 
 ckpts = [0, 5, 10, 15, 20, 30, 40, 50]
+ckpts_bs4 = [6, 11, 15, 20, 30, 40, 50]
 # l = len(ckpts)
 for k, label in enumerate(labels):
     fid_m = []
     for class_label in tqdm(range(10)):
         # plt.subplot(2, 5, class_label+1)
         # ckpts = sorted(fids[label][class_label]['ckpts'])[:l]
-        fids_class = [fids[label][class_label]['fids'][ckpt] for ckpt in ckpts]
+        if 'bs4' in label:
+            fids_class = [fids[labels[k-2]][class_label]['fids'][0]]
+            cs = ckpts_bs4
+        else:
+            fids_class = []
+            cs = ckpts
+        fids_class += [fids[label][class_label]['fids'][ckpt] for ckpt in cs]
         fid_m.append([np.mean(f) for f in fids_class])
     # Mean, std across classes
     fids_mean = np.mean(fid_m, axis=0)
@@ -261,6 +280,6 @@ plt.xlabel("Epochs")
 # plt.subplots_adjust(hspace=.3)
 # plt.subplots_adjust(wspace=.3)
 # plt.savefig(os.path.realpath(os.path.join('/scratch/voletivi/sagan', 'CIFAR10_FIDs_per_class.png')), bbox_inches='tight', pad_inches=0.25)
-plt.savefig(os.path.realpath(os.path.join('/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10', 'CIFAR10_FIDs_meanAcrossClasses_bs.png')), bbox_inches='tight', pad_inches=0.25)
+plt.savefig(os.path.realpath(os.path.join('/home/voletiv/EXPERIMENTS/sngan_christiancosgrove_cifar10', 'CIFAR10_FIDs_meanAcrossClasses_bs_withBS4.png')), bbox_inches='tight', pad_inches=0.25)
 plt.clf()
 plt.close()

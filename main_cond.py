@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
 
+# python main_cond.py --model resnet --loss hinge --data_dir /home/voletivi/scratch/Datasets/CIFAR10 --out_dir /home/voletivi/scratch/sngan_christiancosgrove_cifar10/CGN5 --norm group
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=64)
@@ -66,13 +67,12 @@ optim_gen  = optim.Adam(generator.parameters(), lr=args.lr, betas=(0.0,0.9))
 scheduler_d = optim.lr_scheduler.ExponentialLR(optim_disc, gamma=0.99)
 scheduler_g = optim.lr_scheduler.ExponentialLR(optim_gen, gamma=0.99)
 
+
 def train(epoch):
     for batch_idx, (data, target) in enumerate(loader):
         if data.size()[0] != args.batch_size:
             continue
-
         data, target = Variable(data.cuda()), Variable(target.cuda())
-
         # update discriminator
         for _ in range(disc_iters):
             z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
@@ -88,9 +88,7 @@ def train(epoch):
                     nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.zeros(args.batch_size, 1).cuda()))
             disc_loss.backward()
             optim_disc.step()
-
         z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
-
         # update generator
         optim_disc.zero_grad()
         optim_gen.zero_grad()
@@ -100,7 +98,6 @@ def train(epoch):
             gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.ones(args.batch_size, 1).cuda()))
         gen_loss.backward()
         optim_gen.step()
-
         if batch_idx % 10 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             print(f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
@@ -112,11 +109,9 @@ fixed_labels = torch.from_numpy(np.tile(np.arange(10), args.batch_size//10 + 1)[
 
 
 def evaluate(epoch):
-
     generator.eval()
     samples = generator(fixed_z, fixed_labels).detach().cpu().add(1.).mul(0.5).data[:60]
     generator.train()
-
     save_image(samples, os.path.join(args.samples_dir, f'{epoch:03d}.png'), nrow=10)
 
 os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -126,7 +121,7 @@ evaluate(0)
 torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(0)))
 torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(0)))
 
-for epoch in range(2000):
+for epoch in range(33, 51):
     train(epoch)
     evaluate(epoch)
     torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch+1)))
