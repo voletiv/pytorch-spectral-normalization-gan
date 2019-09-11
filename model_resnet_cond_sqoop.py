@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from spectral_normalization import SpectralNorm
 import numpy as np
 
-channels = 3
+channels = 1
 
 
 class ConditionalGroupNorm(nn.Module):
@@ -63,7 +63,7 @@ class ConditionalBatchNorm(nn.Module):
 
 class ResBlockGenerator(nn.Module):
 
-    def __init__(self, in_channels, out_channels, stride=1, norm_type="batch", num_classes=10):
+    def __init__(self, in_channels, out_channels, stride=1, norm_type="batch", cond_dim=64):
         super(ResBlockGenerator, self).__init__()
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
@@ -71,22 +71,11 @@ class ResBlockGenerator(nn.Module):
         nn.init.xavier_uniform_(self.conv1.weight.data, 1.)
         nn.init.xavier_uniform_(self.conv2.weight.data, 1.)
         if norm_type == "batch":
-            self.norm1 = ConditionalBatchNorm(in_channels, num_classes, emb_or_lin='emb')
-            self.norm2 = ConditionalBatchNorm(out_channels, num_classes, emb_or_lin='emb')
+            self.norm1 = ConditionalBatchNorm(in_channels, cond_dim, emb_or_lin='lin')
+            self.norm2 = ConditionalBatchNorm(out_channels, cond_dim, emb_or_lin='lin')
         elif norm_type == "group":
-            self.norm1 = ConditionalGroupNorm(4, in_channels, num_classes, emb_or_lin='emb')
-            self.norm2 = ConditionalGroupNorm(4, out_channels, num_classes, emb_or_lin='emb')
-
-        # self.model = nn.Sequential(
-        #     nn.BatchNorm2d(in_channels),
-        #     self.norm1,
-        #     nn.ReLU(),
-        #     nn.Upsample(scale_factor=2),
-        #     self.conv1,
-        #     nn.BatchNorm2d(out_channels),
-        #     nn.ReLU(),
-        #     self.conv2
-        #     )
+            self.norm1 = ConditionalGroupNorm(4, in_channels, cond_dim, emb_or_lin='lin')
+            self.norm2 = ConditionalGroupNorm(4, out_channels, cond_dim, emb_or_lin='lin')
 
         self.model1 = nn.Sequential(
             nn.ReLU(),
@@ -147,17 +136,10 @@ class ResBlockDiscriminator(nn.Module):
                 SpectralNorm(self.bypass_conv),
                 nn.AvgPool2d(2, stride=stride, padding=0)
             )
-            # if in_channels == out_channels:
-            #     self.bypass = nn.AvgPool2d(2, stride=stride, padding=0)
-            # else:
-            #     self.bypass = nn.Sequential(
-            #         SpectralNorm(nn.Conv2d(in_channels,out_channels, 1, 1, padding=0)),
-            #         nn.AvgPool2d(2, stride=stride, padding=0)
-            #     )
-
 
     def forward(self, x):
         return self.model(x) + self.bypass(x)
+
 
 # special ResBlock just for the first layer of the discriminator
 class FirstResBlockDiscriminator(nn.Module):
@@ -192,29 +174,36 @@ DISC_SIZE=128
 
 
 class Generator(nn.Module):
-    def __init__(self, z_dim, norm_type="batch", num_classes=10):
+    def __init__(self, z_dim, cond_mode, norm_type="batch", cond_dim=64):
         super(Generator, self).__init__()
         self.z_dim = z_dim
+        self.cond_mode = cond_mode
         self.norm_type = norm_type
-        self.num_classes = num_classes
+        self.cond_dim = cond_dim
+
+        self.obj_emb = nn.Embedding(36, cond_dim)
+        nn.init.xavier_uniform_(self.obj_emb.weight.data, 1.)
+        self.obj_emb = SpectralNorm(self.obj_emb)
+
+        if self.cond_mode == 'obj_rel_obj':
+            self.rel_emb = nn.Embedding(36, cond_dim)
+            nn.init.xavier_uniform_(self.rel_emb.weight.data, 1.)
+            self.rel_emb = SpectralNorm(self.rel_emb)
+
+        cond_init_dim = cond_dim + cond_dim*int(self.cond_mode!='obj') + cond_dim*int(self.cond_mode=='obj_rel_obj')
+        self.cond_lin = nn.Linear(cond_init_dim, self.cond_dim, bias=False)
+        nn.init.xavier_uniform_(self.cond_lin.weight.data, 1.)
+        self.cond_lin = SpectralNorm(self.cond_lin)
 
         self.dense = nn.Linear(self.z_dim, 4 * 4 * GEN_SIZE)
         self.final = nn.Conv2d(GEN_SIZE, channels, 3, stride=1, padding=1)
         nn.init.xavier_uniform_(self.dense.weight.data, 1.)
         nn.init.xavier_uniform_(self.final.weight.data, 1.)
 
-        # self.model = nn.Sequential(
-        #     ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes),
-        #     ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes),
-        #     ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes),
-        #     nn.BatchNorm2d(GEN_SIZE),
-        #     nn.ReLU(),
-        #     self.final,
-        #     nn.Tanh())
-
-        self.block1 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes)
-        self.block2 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes)
-        self.block3 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.num_classes)
+        self.block1 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.cond_dim)
+        self.block2 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.cond_dim)
+        self.block3 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.cond_dim)
+        self.block4 = ResBlockGenerator(GEN_SIZE, GEN_SIZE, 2, self.norm_type, self.cond_dim)
 
         self.model = nn.Sequential(
             nn.BatchNorm2d(GEN_SIZE),
@@ -223,19 +212,32 @@ class Generator(nn.Module):
             nn.Tanh())
 
     def forward(self, z, cond):
-        x = self.dense(z).view(-1, GEN_SIZE, 4, 4)
-        x = self.block1(x, cond)
-        x = self.block2(x, cond)
-        x = self.block3(x, cond)
+        if self.cond_mode == 'obj':
+            cond = self.obj_emb(cond)
+        elif self.cond_mode == 'obj_obj':
+            cond = torch.cat([self.obj_emb(cond[:, 0]), self.obj_emb(cond[:, 1])], dim=1)
+        else:
+            cond = torch.cat([self.obj_emb(cond[:, 0]), self.rel_emb(cond[:, 1]), self.obj_emb(cond[:, 2])], dim=1)
+        cond = self.cond_lin(cond)
+
+        x = self.dense(z).view(-1, GEN_SIZE, 4, 4)  # 4x4
+        x = self.block1(x, cond)    # 8x8
+        x = self.block2(x, cond)    # 16x16
+        x = self.block3(x, cond)    # 32x32
+        x = self.block4(x, cond)    # 64x64
         return self.model(x)
 
 
 class Discriminator(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, cond_mode, cond_dim=64):
         super(Discriminator, self).__init__()
+
+        self.cond_mode = cond_mode
+        self.cond_dim = cond_dim
 
         self.model = nn.Sequential(
                 FirstResBlockDiscriminator(channels, DISC_SIZE, stride=2),
+                ResBlockDiscriminator(DISC_SIZE, DISC_SIZE, stride=2),
                 ResBlockDiscriminator(DISC_SIZE, DISC_SIZE, stride=2),
                 ResBlockDiscriminator(DISC_SIZE, DISC_SIZE),
                 ResBlockDiscriminator(DISC_SIZE, DISC_SIZE),
@@ -246,12 +248,28 @@ class Discriminator(nn.Module):
         nn.init.xavier_uniform_(self.fc.weight.data, 1.)
         self.fc = SpectralNorm(self.fc)
 
-        self.cond_emb = nn.Embedding(num_classes, DISC_SIZE)
-        nn.init.xavier_uniform_(self.cond_emb.weight.data, 1.)
-        self.cond_emb = SpectralNorm(self.cond_emb)
+        self.obj_emb = nn.Embedding(36, self.cond_dim)
+        nn.init.xavier_uniform_(self.obj_emb.weight.data, 1.)
+        self.obj_emb = SpectralNorm(self.obj_emb)
+
+        if self.cond_mode == 'obj_rel_obj':
+            self.rel_emb = nn.Embedding(4, self.cond_dim)
+            nn.init.xavier_uniform_(self.rel_emb.weight.data, 1.)
+            self.rel_emb = SpectralNorm(self.rel_emb)
+
+        cond_init_dim = self.cond_dim + self.cond_dim*int(self.cond_mode!='obj') + self.cond_dim*int(self.cond_mode=='obj_rel_obj')
+        self.cond_lin = nn.Linear(cond_init_dim, DISC_SIZE, bias=False)
+        nn.init.xavier_uniform_(self.cond_lin.weight.data, 1.)
+        self.cond_lin = SpectralNorm(self.cond_lin)
 
     def forward(self, x, cond):
+        if self.cond_mode == 'obj':
+            cond = self.obj_emb(cond)
+        elif self.cond_mode == 'obj_obj':
+            cond = torch.cat([self.obj_emb(cond[:, 0]), self.obj_emb(cond[:, 1])], dim=1)
+        else:
+            cond = torch.cat([self.obj_emb(cond[:, 0]), self.rel_emb(cond[:, 1]), self.obj_emb(cond[:, 2])], dim=1)
         disc_feat = self.model(x).view(-1, DISC_SIZE)
         output1 = self.fc(disc_feat)
-        output2 = torch.sum(torch.mul(disc_feat, self.cond_emb(cond)), dim=1, keepdim=True)
+        output2 = torch.sum(torch.mul(disc_feat, self.cond_lin(cond)), dim=1, keepdim=True)
         return output1 + output2
