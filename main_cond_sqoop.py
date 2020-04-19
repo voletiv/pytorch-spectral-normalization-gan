@@ -118,7 +118,7 @@ def train(epoch):
             gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.ones(args.batch_size, 1).cuda()))
         gen_loss.backward()
         optim_gen.step()
-        if batch_idx % 10 == 0:
+        if batch_idx % 100 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             print(f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
     scheduler_d.step()

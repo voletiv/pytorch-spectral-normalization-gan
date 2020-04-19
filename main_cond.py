@@ -28,7 +28,7 @@ parser.add_argument('--loss', type=str, default='hinge')
 parser.add_argument('--out_dir', type=str, default='./SNGAN')
 parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
 parser.add_argument('--samples_dir', type=str, default='samples')
-parser.add_argument('--data_dir', type=str, default='../data/')
+parser.add_argument('--data_dir', type=str, default='/home/voletivi/scratch/Datasets/CIFAR10')
 parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
 
 parser.add_argument('--model', type=str, default='resnet')
@@ -98,7 +98,7 @@ def train(epoch):
             gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.ones(args.batch_size, 1).cuda()))
         gen_loss.backward()
         optim_gen.step()
-        if batch_idx % 10 == 0:
+        if batch_idx % 100 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             print(f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
     scheduler_d.step()
@@ -121,8 +121,11 @@ evaluate(0)
 torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(0)))
 torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(0)))
 
-for epoch in range(33, 51):
+for epoch in range(35, 51):
     train(epoch)
     evaluate(epoch)
-    torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch+1)))
-    torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch+1)))
+    if epoch+1 % 5 == 0:
+        torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch+1)))
+        torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch+1)))
+        torch.save(optim_disc.state_dict(), os.path.join(args.checkpoint_dir, 'optim_disc_{}'.format(epoch+1)))
+        torch.save(optim_gen.state_dict(), os.path.join(args.checkpoint_dir, 'optim_gen_{}'.format(epoch+1)))
