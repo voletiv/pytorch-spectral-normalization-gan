@@ -20,8 +20,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
 
+from imageio import imread
 from scipy import linalg
-from scipy.misc import imread
 from torch.nn.functional import adaptive_avg_pool2d
 from torchvision import models
 from torch.nn.functional import interpolate
@@ -39,21 +39,24 @@ from scipy.stats import entropy
 
 import model_resnet_cond
 
-# from calc_IS_FID import *; run_me('batch', '/home/voletivi/scratch/sngan_christiancosgrove_cifar10/CBN2/checkpoints', '/home/voletivi/scratch/Datasets/CIFAR10_FID_ref_mean_std_per_class.npz', '/home/voletivi/scratch/Datasets/CIFAR10')
+# from calc_IS_FID_CAS import *; run_me('batch', '/home/voletivi/scratch/sngan_christiancosgrove_cifar10/CBN2/checkpoints', '/home/voletivi/scratch/Datasets/CIFAR10_FID_ref_mean_std_per_class.npz', '/home/voletivi/scratch/Datasets/CIFAR10')
 
 
-def run_me(norm_type, checkpoints_dir, FID_ref_per_class_npz_path, cifar10_data_path,
-            n_samples_per_class=6000, Z_dim=128, num_classes=10, epoch_freq=10):
+def run_me(norm_type, checkpoints_dir, cifar10_data_path, FID_ref_per_class_npz_path=None,
+            n_samples_per_class=6000, Z_dim=128, num_classes=10, epoch_freq=1):
     # FID
-    a = np.load(FID_ref_per_class_npz_path)
-    FID_ref_m = a['mean']
-    FID_ref_s = a['std']
+    if FID_ref_per_class_npz_path is None:
+        FID_ref_m, FID_ref_s = calc_for_CIFAR10(cifar10_data_path)
+    else:
+        a = np.load(FID_ref_per_class_npz_path)
+        FID_ref_m = a['mean']
+        FID_ref_s = a['std']
     # Generator
     G = model_resnet_cond.Generator(Z_dim, norm_type=norm_type, num_classes=num_classes).cuda()
     # Checkpoints
     ckpt_files = sorted(glob.glob(os.path.join(checkpoints_dir, "gen_*")))
-    # epochs = np.array(sorted([int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]))[::epoch_freq]
-    epochs = [1, 6, 11, 15, 20, 30, 40, 50]
+    epochs = np.array(sorted([int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]))[::epoch_freq]
+    # epochs = [1, 6, 11, 15, 20, 30, 40, 50]
     file_prefix = os.path.join(os.path.dirname(ckpt_files[0]), os.path.basename(ckpt_files[0]).split('_')[0])
     # gen_samples_path = os.path.join(checkpoints_dir, '../gen_samples')
     # is_npz_save_path = os.path.join(checkpoints_dir, '../is.npz')
@@ -293,6 +296,41 @@ def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.d
     return best_acc
 
 
+def calc_IS_FID_for_CIFAR10(cifar10_data_path):
+    import torch
+    import tqdm
+    from torchvision import datasets, transforms
+    loader = torch.utils.data.DataLoader(datasets.CIFAR10(cifar10_data_path, train=True, download=True, transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])), batch_size=1000, shuffle=False, num_workers=0, pin_memory=True)
+    imgs = []
+    y = []
+    for im, yy in tqdm.tqdm(loader):
+        imgs.append(im)
+        y.append(yy)
+    # Concat
+    imgs = torch.cat(imgs, dim=0)
+    y = torch.cat(y, dim=0)
+    # FID mean and std
+    model = None
+    FID_m, FID_s = [], []
+    for c in tqdm.tqdm(range(10)):
+        image_set = imgs[y == c]
+        model, mc, sc = calculate_fid_given_images_sets([image_set, None], batch_size=64, gpu='0', dims=2048, model=model, return_only_model_m1_s1=True)
+        FID_m.append(mc)
+        FID_s.append(sc)
+    # Inception score
+    inception_model = None
+    IS_m, IS_s = [], []
+    for c in tqdm.tqdm(range(10)):
+        image_set = imgs[y == c]
+        mc, sc, inception_model = inception_score(image_set, gpu='0', batch_size=64, inception_model=inception_model, return_model=True)
+        IS_m.append(mc)
+        IS_s.append(sc)
+    # Return
+    return FID_m, FID_s, IS_m, IS_s
+
+
 def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_class=256,
                          inception_model=None, fid_model=None, ref_m_per_class=None, ref_s_per_class=None,
                          IS_gpu='0', FID_gpu='0', num_of_classes=10):
@@ -336,7 +374,7 @@ def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_cla
     if save_ref:
         print("Saving FID ref_m_per_class, ref_s_per_class")
         np.savez(os.path.join(save_path, "FID_ref_mean_std_per_class.npz"), mean=ref_m_per_class, std=ref_s_per_class)
-    return ref_m_per_class, ref_s_per_class
+        return ref_m_per_class, ref_s_per_class
 
 
 def calc_inception_score_and_save(ckpt, images, npz_save_path, inception_model=None, gpu='0'):
@@ -703,7 +741,7 @@ def calculate_fid_given_images_sets(images_sets, batch_size, gpu='', dims=2048, 
     device = torch.device('cuda:' + gpu if gpu != '' else 'cpu')
     model = model.to(device)
 
-    m1, s1 = m, s = calculate_activation_statistics(images_sets[0], model, batch_size, dims, gpu != '')
+    m1, s1 = calculate_activation_statistics(images_sets[0], model, batch_size, dims, gpu != '')
 
     if return_only_model_m1_s1:
         return model, m1, s1

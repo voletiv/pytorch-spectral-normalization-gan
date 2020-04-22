@@ -22,18 +22,26 @@ import os
 # python main_cond.py --model resnet --loss hinge --data_dir /home/voletivi/scratch/Datasets/CIFAR10 --out_dir /home/voletivi/scratch/sngan_christiancosgrove_cifar10/CGN5 --norm group
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--out_dir', type=str, default='./SNGAN')
+parser.add_argument('--data_dir', type=str, default='/home/voletivi/scratch/Datasets/CIFAR10')
+parser.add_argument('--n_epochs', type=int, default=100)
+parser.add_argument('--begin_epoch', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--lr', type=float, default=2e-4)
+parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
+parser.add_argument('--save_freq', type=int, default=5)
 parser.add_argument('--loss', type=str, default='hinge')
-parser.add_argument('--out_dir', type=str, default='./SNGAN')
 parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
 parser.add_argument('--samples_dir', type=str, default='samples')
-parser.add_argument('--data_dir', type=str, default='/home/voletivi/scratch/Datasets/CIFAR10')
-parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
 
 parser.add_argument('--model', type=str, default='resnet')
 
 args = parser.parse_args()
+
+if args.norm == 'group':
+    args.out_dir += '_CGN'
+else:
+    args.out_dir += '_CBN'
 
 args.checkpoint_dir = os.path.join(args.out_dir, args.checkpoint_dir)
 args.samples_dir = os.path.join(args.out_dir, args.samples_dir)
@@ -43,7 +51,7 @@ loader = torch.utils.data.DataLoader(
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])),
-        batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=True)
+        batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
 
 Z_dim = 128
 #number of updates to discriminator for every update to generator 
@@ -100,7 +108,8 @@ def train(epoch):
         optim_gen.step()
         if batch_idx % 100 == 0:
             curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
-            print(f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}')
+            log = f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}\n'
+            logg(log)
     scheduler_d.step()
     scheduler_g.step()
 
@@ -117,15 +126,30 @@ def evaluate(epoch):
 os.makedirs(args.checkpoint_dir, exist_ok=True)
 os.makedirs(args.samples_dir, exist_ok=True)
 
+
+def logg(log):
+    print(log)
+    log_file.write(log)
+    log_file.flush()
+
+# Logging
+log_file = open(os.path.join(args.out_dir, 'log.txt'), "wt")
+log = str(args) + '\n'
+logg(log)
+
 evaluate(0)
+log = f"Saving disc_{0}, gen{0}\n"
+logg(log)
 torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(0)))
 torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(0)))
 
-for epoch in range(35, 51):
+for epoch in range(args.begin_epoch, args.begin_epoch+args.n_epochs):
     train(epoch)
     evaluate(epoch)
-    if epoch+1 % 5 == 0:
-        torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch+1)))
-        torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch+1)))
-        torch.save(optim_disc.state_dict(), os.path.join(args.checkpoint_dir, 'optim_disc_{}'.format(epoch+1)))
-        torch.save(optim_gen.state_dict(), os.path.join(args.checkpoint_dir, 'optim_gen_{}'.format(epoch+1)))
+    if epoch % args.save_freq == 0:
+        log = f"Saving disc_{epoch}, gen_{epoch}\n"
+        logg(log)
+        torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(epoch)))
+        torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(epoch)))
+        torch.save(optim_disc.state_dict(), os.path.join(args.checkpoint_dir, 'optim_disc_{}'.format(epoch)))
+        torch.save(optim_gen.state_dict(), os.path.join(args.checkpoint_dir, 'optim_gen_{}'.format(epoch)))
