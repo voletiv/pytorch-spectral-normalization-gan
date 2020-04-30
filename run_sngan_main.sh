@@ -9,14 +9,33 @@
 norm='batch'
 save='/home/voletivi/scratch/sngan_christiancosgrove_cifar10/exp'
 
-epochs=1000
 bs=256
-di=5
-g=256
-d=128
+diters=5
 lr=0.0002
 beta1=0.0
 beta2=0.9
+
+# bs=256
+# di=1
+# lr=0.0002
+# beta1=0.0
+# beta2=0.9
+
+# bs=256
+# di=1
+# lr=0.0002
+# beta1=0.5
+# beta2=0.999
+
+# bs=256
+# di=5
+# lr=0.0002
+# beta1=0.5
+# beta2=0.999
+
+epochs=1000
+gsize=256
+dsize=128
 
 export HOME=`getent passwd $USER | cut -d':' -f6`
 source ~/.bashrc
@@ -32,14 +51,14 @@ source ~/myenvs/vode/bin/activate
 
 cp /scratch/voletivi/Datasets/CIFAR10 $SLURM_TMPDIR/
 
-python main_cond.py \
+python main.py \
         --out_dir $save \
         --data_dir $SLURM_TMPDIR/CIFAR10 \
         --n_epochs $epochs \
         --batch_size $bs \
-        --disc_iters $di \
-        --gen_size $g \
-        --disc_size $d \
+        --disc_iters $diters \
+        --gen_size $gsize \
+        --disc_size $dsize \
         --lr $lr \
         --beta1 $beta1 \
         --beta2 $beta2 \

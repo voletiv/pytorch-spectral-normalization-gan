@@ -50,7 +50,7 @@ parser.add_argument('--check', action='store_true', default='hinge')
 parser.add_argument('--model', type=str, default='resnet')
 
 args = parser.parse_args()
-args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_b1{args.beta1}_b2{args.beta2}')
+args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_beta_{args.beta1}_{args.beta2}')
 
 args.checkpoint_dir = os.path.join(args.out_dir, args.checkpoint_dir)
 args.samples_dir = os.path.join(args.out_dir, args.samples_dir)
@@ -88,7 +88,7 @@ optim_gen  = optim.Adam(generator.parameters(), lr=args.lr, betas=(args.beta1, a
 #         param_group['lr'] = lr
 
 def train(epoch):
-    start_time = time.time()
+    epoch_start_time = time.time()
     for batch_idx, (data, target) in enumerate(loader):
         if data.size()[0] != args.batch_size:
             continue
@@ -124,9 +124,13 @@ def train(epoch):
         if batch_idx % 20 == 0:
             curr_time = time.time()
             curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
-            elapsed = str(datetime.timedelta(seconds=(curr_time - start_time)))
+            elapsed = str(datetime.timedelta(seconds=(curr_time - epoch_start_time)))
             log = f'[{curr_time_str}] [{elapsed}] Epoch {epoch}, (batch {batch_idx} of {len(loader)}), disc_loss {disc_loss.item():.04f}, gen_loss {gen_loss.item():.04f}\n'
             logg(log)
+
+        if args.check:
+            break
+
     # scheduler_d.step()
     # scheduler_g.step()
 
@@ -193,11 +197,17 @@ if args.isfid:
         # Plot
         plt.errorbar(np.arange(len(fids))*args.save_freq, [IS_ref_m]*len(fids), yerr=[IS_ref_s]*len(fids), color='k', alpha=0.7, label="CIFAR10")
         plt.errorbar(np.arange(len(fids))*args.save_freq, is_m, yerr=is_s, alpha=0.7, label="IS")
+        plt.legend()
         plt.savefig(os.path.join(args.out_dir, "is.png"), bbox_inches='tight', pad_inches=0.1)
+        plt.yscale("log")
+        plt.savefig(os.path.join(args.out_dir, "is_log.png"), bbox_inches='tight', pad_inches=0.1)
         plt.clf()
         plt.close()
         plt.plot(np.arange(len(fids))*args.save_freq, fids, alpha=0.7, label="FID")
+        plt.legend()
         plt.savefig(os.path.join(args.out_dir, "fid.png"), bbox_inches='tight', pad_inches=0.1)
+        plt.yscale("log")
+        plt.savefig(os.path.join(args.out_dir, "fid_log.png"), bbox_inches='tight', pad_inches=0.1)
         plt.clf()
         plt.close()
         return is_m, is_s, fids, inception_model, fid_model
@@ -209,9 +219,22 @@ if args.isfid:
     logg(log)
 
 # TRAIN
+start_time = time.time()
 for epoch in range(args.begin_epoch, args.begin_epoch+args.n_epochs):
     train(epoch)
+    # Time
+    curr_time = time.time()
+    curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
+    elapsed = str(datetime.timedelta(seconds=(curr_time - start_time)))
+    log = f"[{curr_time_str}] [{elapsed}] Epoch {epoch} train done.\n"
+    logg(log)
     evaluate(epoch)
+    # Time
+    curr_time = time.time()
+    curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
+    elapsed = str(datetime.timedelta(seconds=(curr_time - start_time)))
+    log = f"[{curr_time_str}] [{elapsed}] Epoch {epoch} eval done.\n"
+    logg(log)
     if epoch % args.save_freq == 0:
         log = f"Saving disc_{epoch}, gen_{epoch}\n"
         logg(log)
@@ -222,5 +245,9 @@ for epoch in range(args.begin_epoch, args.begin_epoch+args.n_epochs):
         # IS, FID
         if args.isfid:
             is_m, is_s, fids, inception_model, fid_model = plot_IS_FID(is_m, is_s, fids, inception_model, fid_model)
-            log = f"Epoch {epoch}, IS_mean {is_m[-1]}, IS_std {is_s[-1]}, FID {fids[-1]}\n"
-            logg(log)
+        # Time
+        curr_time = time.time()
+        curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
+        elapsed = str(datetime.timedelta(seconds=(curr_time - start_time)))
+        log = f"[{curr_time_str}] [{elapsed}] Epoch {epoch}, IS_mean {is_m[-1]}, IS_std {is_s[-1]}, FID {fids[-1]}\n"
+        logg(log)
