@@ -10,13 +10,19 @@ channels = 3
 
 class ResBlockGenerator(nn.Module):
 
-    def __init__(self, in_channels, out_channels, stride=1):
+    def __init__(self, in_channels, out_channels, stride=1, sn=False):
         super(ResBlockGenerator, self).__init__()
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
+        self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
         nn.init.xavier_uniform_(self.conv1.weight.data, 1.)
         nn.init.xavier_uniform_(self.conv2.weight.data, 1.)
+
+        if sn:
+            self.conv1 = SpectralNorm(self.conv1)
+            self.conv2 = SpectralNorm(self.conv2)
+            self.bypass_conv = SpectralNorm(self.bypass_conv)
 
         self.model = nn.Sequential(
             nn.BatchNorm2d(in_channels),
@@ -27,9 +33,13 @@ class ResBlockGenerator(nn.Module):
             nn.ReLU(),
             self.conv2
             )
+
         self.bypass = nn.Sequential()
         if stride != 1:
-            self.bypass = nn.Upsample(scale_factor=2)
+            self.bypass = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                self.bypass_conv
+            )
 
     def forward(self, x):
         return self.model(x) + self.bypass(x)
@@ -63,7 +73,7 @@ class ResBlockDiscriminator(nn.Module):
         self.bypass = nn.Sequential()
         if stride != 1:
 
-            self.bypass_conv = nn.Conv2d(in_channels,out_channels, 1, 1, padding=0)
+            self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
             nn.init.xavier_uniform_(self.bypass_conv.weight.data, np.sqrt(2))
 
             self.bypass = nn.Sequential(
@@ -110,34 +120,39 @@ class FirstResBlockDiscriminator(nn.Module):
     def forward(self, x):
         return self.model(x) + self.bypass(x)
 
-GEN_SIZE=128
-DISC_SIZE=128
 
 class Generator(nn.Module):
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, GEN_SIZE=256, sn=False):
         super(Generator, self).__init__()
         self.z_dim = z_dim
+        self.GEN_SIZE = GEN_SIZE
+        self.sn = sn
 
         self.dense = nn.Linear(self.z_dim, 4 * 4 * GEN_SIZE)
         self.final = nn.Conv2d(GEN_SIZE, channels, 3, stride=1, padding=1)
         nn.init.xavier_uniform_(self.dense.weight.data, 1.)
         nn.init.xavier_uniform_(self.final.weight.data, 1.)
+        if sn:
+            self.dense = SpectralNorm(self.dense)
+            self.final = SpectralNorm(self.final)
 
         self.model = nn.Sequential(
-            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2),
-            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2),
-            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2),
+            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2, sn=sn),
+            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2, sn=sn),
+            ResBlockGenerator(GEN_SIZE, GEN_SIZE, stride=2, sn=sn),
             nn.BatchNorm2d(GEN_SIZE),
             nn.ReLU(),
             self.final,
             nn.Tanh())
 
     def forward(self, z):
-        return self.model(self.dense(z).view(-1, GEN_SIZE, 4, 4))
+        return self.model(self.dense(z).view(-1, self.GEN_SIZE, 4, 4))
 
 class Discriminator(nn.Module):
-    def __init__(self):
+    def __init__(self, DISC_SIZE=128):
         super(Discriminator, self).__init__()
+
+        self.DISC_SIZE = DISC_SIZE
 
         self.model = nn.Sequential(
                 FirstResBlockDiscriminator(channels, DISC_SIZE, stride=2),
@@ -152,4 +167,4 @@ class Discriminator(nn.Module):
         self.fc = SpectralNorm(self.fc)
 
     def forward(self, x):
-        return self.fc(self.model(x).view(-1,DISC_SIZE))
+        return self.fc(self.model(x).view(-1, self.DISC_SIZE))

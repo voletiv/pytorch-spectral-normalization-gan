@@ -27,7 +27,11 @@ parser.add_argument('--data_dir', type=str, default='/home/voletivi/scratch/Data
 parser.add_argument('--n_epochs', type=int, default=100)
 parser.add_argument('--begin_epoch', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--disc_iters', type=int, default=1, help="number of updates to discriminator for every update to generator ")
+parser.add_argument('--Z_dim', type=int, default=128)
 parser.add_argument('--lr', type=float, default=2e-4)
+parser.add_argument('--beta1', type=float, default=0.5)
+parser.add_argument('--beta2', type=float, default=0.999)
 parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
 parser.add_argument('--save_freq', type=int, default=5)
 parser.add_argument('--loss', type=str, default='hinge')
@@ -53,22 +57,18 @@ loader = torch.utils.data.DataLoader(
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])),
         batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
 
-Z_dim = 128
-#number of updates to discriminator for every update to generator 
-disc_iters = 5
-
 # discriminator = torch.nn.DataParallel(Discriminator()).cuda() # TODO: try out multi-gpu training
 if args.model == 'resnet':
     discriminator = model_resnet_cond.Discriminator(num_classes=10).cuda()
-    generator = model_resnet_cond.Generator(Z_dim, norm_type=args.norm, num_classes=10).cuda()
+    generator = model_resnet_cond.Generator(args.Z_dim, norm_type=args.norm, num_classes=10).cuda()
 # else:
 #     discriminator = model.Discriminator().cuda()
-#     generator = model.Generator(Z_dim).cuda()
+#     generator = model.Generator(args.Z_dim).cuda()
 
 # because the spectral normalization module creates parameters that don't require gradients (u and v), we don't want to 
 # optimize these using sgd. We only let the optimizer operate on parameters that _do_ require gradients
 # TODO: replace Parameters with buffers, which aren't returned from .parameters() method.
-optim_disc = optim.Adam(filter(lambda p: p.requires_grad, discriminator.parameters()), lr=args.lr, betas=(0.0,0.9))
+optim_disc = optim.Adam(filter(lambda p: p.requires_grad, discriminator.parameters()), lr=args.lr, betas=(0.5,0.999))
 optim_gen  = optim.Adam(generator.parameters(), lr=args.lr, betas=(0.0,0.9))
 
 # use an exponentially decaying learning rate
@@ -82,8 +82,8 @@ def train(epoch):
             continue
         data, target = Variable(data.cuda()), Variable(target.cuda())
         # update discriminator
-        for _ in range(disc_iters):
-            z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
+        for _ in range(args.disc_iters):
+            z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
             optim_disc.zero_grad()
             optim_gen.zero_grad()
             # import pdb; pdb.set_trace()
@@ -96,7 +96,7 @@ def train(epoch):
                     nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.zeros(args.batch_size, 1).cuda()))
             disc_loss.backward()
             optim_disc.step()
-        z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
+        z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
         # update generator
         optim_disc.zero_grad()
         optim_gen.zero_grad()
@@ -113,7 +113,7 @@ def train(epoch):
     scheduler_d.step()
     scheduler_g.step()
 
-fixed_z = Variable(torch.randn(args.batch_size, Z_dim).cuda())
+fixed_z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
 fixed_labels = torch.from_numpy(np.tile(np.arange(10), args.batch_size//10 + 1)[:args.batch_size]).cuda()
 
 
