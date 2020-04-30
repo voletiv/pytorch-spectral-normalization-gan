@@ -42,8 +42,8 @@ import model_resnet_cond
 # from calc_IS_FID_CAS import *; run_me('batch', '/home/voletivi/scratch/sngan_christiancosgrove_cifar10/CBN2/checkpoints', '/home/voletivi/scratch/Datasets/CIFAR10_FID_ref_mean_std_per_class.npz', '/home/voletivi/scratch/Datasets/CIFAR10')
 
 
-def run_me(norm_type, checkpoints_dir, cifar10_data_path, FID_ref_per_class_npz_path=None,
-            n_samples_per_class=6000, Z_dim=128, num_classes=10, epoch_freq=1):
+def run_me(cond, checkpoints_dir, cifar10_data_path, norm_type='batch', gen_size=256, FID_ref_per_class_npz_path=None,
+            n_samples_per_class=5000, Z_dim=128, num_classes=10, epoch_freq=1, batch_size=256):
     # FID
     if FID_ref_per_class_npz_path is None:
         FID_ref_m, FID_ref_s = calc_for_CIFAR10(cifar10_data_path)
@@ -52,7 +52,10 @@ def run_me(norm_type, checkpoints_dir, cifar10_data_path, FID_ref_per_class_npz_
         FID_ref_m = a['mean']
         FID_ref_s = a['std']
     # Generator
-    G = model_resnet_cond.Generator(Z_dim, norm_type=norm_type, num_classes=num_classes).cuda()
+    if cond:
+        G = model_resnet_cond.Generator(Z_dim, norm_type=norm_type, num_classes=num_classes).cuda()
+    else:
+        G = model_resnet.Generator(Z_dim, gen_size).cuda()
     # Checkpoints
     ckpt_files = sorted(glob.glob(os.path.join(checkpoints_dir, "gen_*")))
     epochs = np.array(sorted([int(os.path.basename(p).split('_')[-1]) for p in ckpt_files]))[::epoch_freq]
@@ -78,9 +81,9 @@ def run_me(norm_type, checkpoints_dir, cifar10_data_path, FID_ref_per_class_npz_
         G.load_state_dict(torch.load(pth_filename))
         print("Generating", n_samples_per_class, "samples per class, for", num_classes, "classes")
         # Generate images
-        images_per_class = generate_n_samples_per_class(G, n_samples_per_class=n_samples_per_class, save=False, num_of_classes=num_classes)
+        images_per_class = generate_n_samples_per_class(G, n_samples_per_class=n_samples_per_class, batch_size=batch_size, save=False, num_of_classes=num_classes)
         # Calc IS, FID
-        calc_IS_FID_and_save(G, images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
+        calc_IS_FID_and_save(images_per_class, epoch, save_path, ref_m_per_class=FID_ref_m, ref_s_per_class=FID_ref_s, num_of_classes=num_classes)
         # Calc CAS
         # print("Calculating CAS")
         # CAS(CAS_npz_path, epoch, images_per_class, cifar10_data_path)
@@ -296,7 +299,7 @@ def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.d
     return best_acc
 
 
-def calc_IS_FID_for_CIFAR10(cifar10_data_path):
+def calc_IS_FID_for_CIFAR10(cifar10_data_path, per_class=False, check=False):
     import torch
     import tqdm
     from torchvision import datasets, transforms
@@ -305,33 +308,53 @@ def calc_IS_FID_for_CIFAR10(cifar10_data_path):
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])), batch_size=1000, shuffle=False, num_workers=0, pin_memory=True)
     imgs = []
     y = []
+    print("Generating images")
     for im, yy in tqdm.tqdm(loader):
         imgs.append(im)
         y.append(yy)
+        if check:
+            break
     # Concat
     imgs = torch.cat(imgs, dim=0)
     y = torch.cat(y, dim=0)
-    # FID mean and std
-    model = None
-    FID_m, FID_s = [], []
-    for c in tqdm.tqdm(range(10)):
-        image_set = imgs[y == c]
-        model, mc, sc = calculate_fid_given_images_sets([image_set, None], batch_size=64, gpu='0', dims=2048, model=model, return_only_model_m1_s1=True)
-        FID_m.append(mc)
-        FID_s.append(sc)
     # Inception score
     inception_model = None
-    IS_m, IS_s = [], []
-    for c in tqdm.tqdm(range(10)):
-        image_set = imgs[y == c]
-        mc, sc, inception_model = inception_score(image_set, gpu='0', batch_size=64, inception_model=inception_model, return_model=True)
-        IS_m.append(mc)
-        IS_s.append(sc)
+    if per_class:
+        # Per class
+        print("IS per class")
+        IS_mc, IS_sc = [], []
+        for c in tqdm.tqdm(range(10)):
+            image_set = imgs[y == c]
+            mc, sc, inception_model = inception_score(image_set, gpu='0', batch_size=64, inception_model=inception_model, return_model=True)
+            IS_mc.append(mc)
+            IS_sc.append(sc)
+    else:
+        # Overall
+        print("IS")
+        IS_m, IS_s, inception_model = inception_score(imgs, gpu='0', batch_size=64, inception_model=inception_model, return_model=True)
+    # FID mean and std
+    FID_model = None
+    if per_class:
+        # Per class
+        print("FID per class")
+        FID_mc, FID_sc = [], []
+        for c in tqdm.tqdm(range(10)):
+            image_set = imgs[y == c]
+            FID_model, mc, sc = calculate_fid_given_images_sets([image_set, None], batch_size=64, gpu='0', dims=2048, model=FID_model, return_only_model_m1_s1=True)
+            FID_mc.append(mc)
+            FID_sc.append(sc)
+    else:
+        # Overall
+        print("FID")
+        FID_model, FID_m, FID_s = calculate_fid_given_images_sets([imgs, None], batch_size=64, gpu='0', dims=2048, model=FID_model, return_only_model_m1_s1=True)
     # Return
-    return FID_m, FID_s, IS_m, IS_s
+    if per_class:
+        return IS_mc, IS_sc, FID_mc, FID_sc
+    else:
+        return IS_m, IS_s, FID_m, FID_s
 
 
-def calc_IS_FID_and_save(G, images_per_class, ckpt, save_path, n_samples_per_class=256,
+def calc_IS_FID_and_save(images_per_class, ckpt, save_path, n_samples_per_class=256,
                          inception_model=None, fid_model=None, ref_m_per_class=None, ref_s_per_class=None,
                          IS_gpu='0', FID_gpu='0', num_of_classes=10):
     # Generate samples

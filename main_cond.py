@@ -1,23 +1,24 @@
 import argparse
 import datetime
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+import os
 import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
 from torch.optim.lr_scheduler import ExponentialLR
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from torch.autograd import Variable
+
 import model_resnet_cond
 import model
-
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import os
 
 # python main_cond.py --model resnet --loss hinge --data_dir /home/voletivi/scratch/Datasets/CIFAR10 --out_dir /home/voletivi/scratch/sngan_christiancosgrove_cifar10/CGN5 --norm group
 
@@ -41,6 +42,7 @@ parser.add_argument('--samples_dir', type=str, default='samples')
 parser.add_argument('--model', type=str, default='resnet')
 
 args = parser.parse_args()
+args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}')
 
 if args.norm == 'group':
     args.out_dir += '_CGN'
@@ -107,8 +109,10 @@ def train(epoch):
         gen_loss.backward()
         optim_gen.step()
         if batch_idx % 100 == 0:
-            curr_time_str = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
-            log = f'[{curr_time_str}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}\n'
+            curr_time = time.time()
+            curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
+            elapsed = str(datetime.timedelta(seconds=(curr_time - start_time)))
+            log = f'[{curr_time_str}] [{elapsed}] Epoch {epoch} (batch {batch_idx} of {len(loader)}) disc_loss {disc_loss.item():.04f} gen_loss {gen_loss.item():.04f}\n'
             logg(log)
     scheduler_d.step()
     scheduler_g.step()
@@ -142,6 +146,8 @@ log = f"Saving disc_{0}, gen{0}\n"
 logg(log)
 torch.save(discriminator.state_dict(), os.path.join(args.checkpoint_dir, 'disc_{}'.format(0)))
 torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(0)))
+
+IS_m, IS_s, FID_ref_m, FID_ref_s = calc_IS_FID_for_CIFAR10(args.data_dir)
 
 for epoch in range(args.begin_epoch, args.begin_epoch+args.n_epochs):
     train(epoch)

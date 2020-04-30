@@ -21,8 +21,10 @@ nvidia-smi
 module load python/3.6
 source ~/myenvs/vode/bin/activate
 
+cp /scratch/voletivi/Datasets/CIFAR10 $SLURM_TMPDIR/
+
 python main_cond.py \
-        --data_dir '/home/voletivi/scratch/Datasets/CIFAR10' \
+        --data_dir $SLURM_TMPDIR/CIFAR10 \
         --out_dir $save \
         --norm $norm \
         --model 'resnet' \
