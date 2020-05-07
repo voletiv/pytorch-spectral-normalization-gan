@@ -28,31 +28,41 @@ from calc_IS_FID_CAS import calc_IS_FID_for_CIFAR10, inception_score, calculate_
 parser = argparse.ArgumentParser()
 parser.add_argument('--out_dir', type=str, default='./SNGAN')
 parser.add_argument('--data_dir', type=str, default='/home/voletivi/scratch/Datasets/CIFAR10')
+
+parser.add_argument('--loss', type=str, default='hinge', choices=['hinge', 'wasserstein', 'wgangp'])
+parser.add_argument('--lambda_gp', type=float, default=10.0)
 parser.add_argument('--n_epochs', type=int, default=1000)
 parser.add_argument('--begin_epoch', type=int, default=1)
-parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--disc_iters', type=int, default=5, help="number of updates to discriminator for every update to generator ")
-parser.add_argument('--Z_dim', type=int, default=128)
-parser.add_argument('--gen_size', type=int, default=256)
-parser.add_argument('--disc_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--lr', type=float, default=2e-4)
-parser.add_argument('--beta1', type=float, default=0.0)
-parser.add_argument('--beta2', type=float, default=0.9)
-parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
-parser.add_argument('--save_freq', type=int, default=5)
-parser.add_argument('--loss', type=str, default='hinge')
-parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
-parser.add_argument('--samples_dir', type=str, default='samples')
-parser.add_argument('--exp_schedule', type=eval, default=False)
-
-parser.add_argument('--isfid', type=eval, default=True)
-parser.add_argument('--check', action='store_true', default=False)
+parser.add_argument('--beta1', type=float, default=0.5)
+parser.add_argument('--beta2', type=float, default=0.999)
+parser.add_argument('--exp_schedule', type=eval, default=True)
 
 parser.add_argument('--model', type=str, default='resnet')
-parser.add_argument('--sn', type=eval, default=False)
+parser.add_argument('--sn_d', type=eval, default=True)
+parser.add_argument('--sn_g', type=eval, default=False)
+parser.add_argument('--disc_iters', type=int, default=5, help="number of updates to discriminator for every update to generator ")
+parser.add_argument('--Z_dim', type=int, default=128)
+parser.add_argument('--gen_size', type=int, default=128)
+parser.add_argument('--disc_size', type=int, default=128)
+parser.add_argument('--norm', choices=['batch', 'group'], default='batch')
+
+parser.add_argument('--isfid', type=eval, default=True)
+parser.add_argument('--log_freq', type=int, default=20)
+parser.add_argument('--save_freq', type=int, default=5)
+parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
+parser.add_argument('--samples_dir', type=str, default='samples')
+
+parser.add_argument('--check', action='store_true', default=False)
 
 args = parser.parse_args()
-args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_beta_{args.beta1}_{args.beta2}_sn{str(args.sn)[0]}')
+
+if args.loss == 'wgangp':
+    args.sn_d = False
+    args.sn_g = False
+
+args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_beta_{args.beta1}_{args.beta2}_Dsn{str(args.sn_d)[0]}_Gsn{str(args.sn_g)[0]}')
 if args.exp_schedule:
     args.out_dir += "_expDecay"
 
@@ -70,8 +80,8 @@ loader = torch.utils.data.DataLoader(
 
 # discriminator = torch.nn.DataParallel(Discriminator()).cuda() # TODO: try out multi-gpu training
 if args.model == 'resnet':
-    discriminator = model_resnet.Discriminator(args.disc_size).cuda()
-    generator = model_resnet.Generator(args.Z_dim, args.gen_size, args.sn).cuda()
+    discriminator = model_resnet.Discriminator(args.disc_size, args.sn_d).cuda()
+    generator = model_resnet.Generator(args.Z_dim, args.gen_size, args.sn_g).cuda()
 else:
     discriminator = model.Discriminator().cuda()
     generator = model.Generator(args.Z_dim).cuda()
@@ -92,6 +102,7 @@ if args.exp_schedule:
 #     for param_group in optimizer.param_groups:
 #         param_group['lr'] = lr
 
+
 def train(epoch):
     epoch_start_time = time.time()
     for batch_idx, (data, target) in enumerate(loader):
@@ -104,13 +115,33 @@ def train(epoch):
             z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
             optim_disc.zero_grad()
             optim_gen.zero_grad()
+            fake = generator(z)
+            # Loss
             if args.loss == 'hinge':
-                disc_loss = nn.ReLU()(1.0 - discriminator(data)).mean() + nn.ReLU()(1.0 + discriminator(generator(z))).mean()
-            elif args.loss == 'wasserstein':
-                disc_loss = -discriminator(data).mean() + discriminator(generator(z)).mean()
+                disc_loss = nn.ReLU()(1.0 - discriminator(data)).mean() + nn.ReLU()(1.0 + discriminator(fake)).mean()
+            elif args.loss == 'wasserstein' or args.loss == 'wgangp':
+                disc_loss = -discriminator(data).mean() + discriminator(fake).mean()
             else:
                 disc_loss = nn.BCEWithLogitsLoss()(discriminator(data), Variable(torch.ones(args.batch_size, 1).cuda())) + \
-                    nn.BCEWithLogitsLoss()(discriminator(generator(z)), Variable(torch.zeros(args.batch_size, 1).cuda()))
+                    nn.BCEWithLogitsLoss()(discriminator(fake), Variable(torch.zeros(args.batch_size, 1).cuda()))
+            # If WGAN_GP, compute GP and add to D loss
+            if args.loss == 'wgangp' and args.lambda_gp > 0:
+                alpha = torch.rand(data.size(0), 1, 1, 1).expand_as(data).cuda()
+                interp = alpha * data + (1 - alpha) * fake.detach()
+                interp = interp.clone().detach().requires_grad_(True).cuda()
+                out = discriminator(interp)
+                exp_grad = torch.ones(out.size()).cuda()
+                grad = torch.autograd.grad(outputs=out,
+                                           inputs=interp,
+                                           grad_outputs=exp_grad,
+                                           retain_graph=True,
+                                           create_graph=True,
+                                           only_inputs=True)[0]
+                grad = grad.view(grad.size(0), -1)
+                grad_l2norm = torch.sqrt(torch.sum(grad ** 2, dim=1))
+                d_loss_gp = args.lambda_gp * torch.mean((grad_l2norm - 1) ** 2)
+                disc_loss += d_loss_gp
+            # Optimize
             disc_loss.backward()
             optim_disc.step()
 
@@ -126,11 +157,14 @@ def train(epoch):
         gen_loss.backward()
         optim_gen.step()
 
-        if batch_idx % 20 == 0:
+        if batch_idx % args.log_freq == 0:
             curr_time = time.time()
             curr_time_str = datetime.datetime.fromtimestamp(curr_time).strftime('%Y-%m-%d %H:%M:%S')
             elapsed = str(datetime.timedelta(seconds=(curr_time - epoch_start_time)))
-            log = f'[{curr_time_str}] [{elapsed}] Epoch {epoch}, (batch {batch_idx} of {len(loader)}), disc_loss {disc_loss.item():.04f}, gen_loss {gen_loss.item():.04f}\n'
+            log = f'[{curr_time_str}] [{elapsed}] Epoch {epoch}, (batch {batch_idx} of {len(loader)}), disc_loss {disc_loss.item():.04f}, gen_loss {gen_loss.item():.04f}'
+            if args.loss == 'wgangp':
+                log += f', d_loss_gp {d_loss_gp.item():.04f}'
+            log += '\n'
             logg(log)
 
         if args.check:
