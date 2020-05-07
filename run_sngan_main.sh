@@ -14,21 +14,23 @@ diters=5
 lr=0.0002
 beta1=0.0
 beta2=0.9
+sn="False"
+exp="False"
 
 # bs=256
-# di=1
+# diters=1
 # lr=0.0002
 # beta1=0.0
 # beta2=0.9
 
 # bs=256
-# di=1
+# diters=1
 # lr=0.0002
 # beta1=0.5
 # beta2=0.999
 
 # bs=256
-# di=5
+# diters=5
 # lr=0.0002
 # beta1=0.5
 # beta2=0.999
@@ -49,7 +51,7 @@ nvidia-smi
 module load python/3.6
 source ~/myenvs/vode/bin/activate
 
-cp /scratch/voletivi/Datasets/CIFAR10 $SLURM_TMPDIR/
+cp -r /scratch/voletivi/Datasets/CIFAR10 $SLURM_TMPDIR/
 
 python main.py \
         --out_dir $save \
@@ -62,6 +64,8 @@ python main.py \
         --lr $lr \
         --beta1 $beta1 \
         --beta2 $beta2 \
+        --sn $sn \
+        --exp_schedule $exp \
         --norm $norm \
         --model 'resnet' \
         --loss 'hinge'

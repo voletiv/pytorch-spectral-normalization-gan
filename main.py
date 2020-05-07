@@ -43,14 +43,18 @@ parser.add_argument('--save_freq', type=int, default=5)
 parser.add_argument('--loss', type=str, default='hinge')
 parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
 parser.add_argument('--samples_dir', type=str, default='samples')
-parser.add_argument('--isfid', type=eval, default=True)
+parser.add_argument('--exp_schedule', type=eval, default=False)
 
-parser.add_argument('--check', action='store_true', default='hinge')
+parser.add_argument('--isfid', type=eval, default=True)
+parser.add_argument('--check', action='store_true', default=False)
 
 parser.add_argument('--model', type=str, default='resnet')
+parser.add_argument('--sn', type=eval, default=False)
 
 args = parser.parse_args()
-args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_beta_{args.beta1}_{args.beta2}')
+args.out_dir = os.path.join(os.path.dirname(args.out_dir), f'{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(args.out_dir)}_bs{args.batch_size}_di{args.disc_iters}_z{args.Z_dim}_G{args.gen_size}_D{args.disc_size}_lr{args.lr}_beta_{args.beta1}_{args.beta2}_sn{str(args.sn)[0]}')
+if args.exp_schedule:
+    args.out_dir += "_expDecay"
 
 args.checkpoint_dir = os.path.join(args.out_dir, args.checkpoint_dir)
 args.samples_dir = os.path.join(args.out_dir, args.samples_dir)
@@ -67,7 +71,7 @@ loader = torch.utils.data.DataLoader(
 # discriminator = torch.nn.DataParallel(Discriminator()).cuda() # TODO: try out multi-gpu training
 if args.model == 'resnet':
     discriminator = model_resnet.Discriminator(args.disc_size).cuda()
-    generator = model_resnet.Generator(args.Z_dim, args.gen_size).cuda()
+    generator = model_resnet.Generator(args.Z_dim, args.gen_size, args.sn).cuda()
 else:
     discriminator = model.Discriminator().cuda()
     generator = model.Generator(args.Z_dim).cuda()
@@ -79,8 +83,9 @@ optim_disc = optim.Adam(filter(lambda p: p.requires_grad, discriminator.paramete
 optim_gen  = optim.Adam(generator.parameters(), lr=args.lr, betas=(args.beta1, args.beta2))
 
 # use an exponentially decaying learning rate
-# scheduler_d = optim.lr_scheduler.ExponentialLR(optim_disc, gamma=0.99)
-# scheduler_g = optim.lr_scheduler.ExponentialLR(optim_gen, gamma=0.99)
+if args.exp_schedule:
+    scheduler_d = optim.lr_scheduler.ExponentialLR(optim_disc, gamma=0.99)
+    scheduler_g = optim.lr_scheduler.ExponentialLR(optim_gen, gamma=0.99)
 
 # def adjust_lr(optimizer, epoch):
 #     lr = args.lr * (0.1 ** (epoch // 20))
@@ -131,8 +136,9 @@ def train(epoch):
         if args.check:
             break
 
-    # scheduler_d.step()
-    # scheduler_g.step()
+    if args.exp_schedule:
+        scheduler_d.step()
+        scheduler_g.step()
 
 
 def logg(log):
