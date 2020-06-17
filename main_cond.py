@@ -15,7 +15,6 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ExponentialLR
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
-from torch.autograd import Variable
 
 import model_resnet_cond
 import model
@@ -82,10 +81,10 @@ def train(epoch):
     for batch_idx, (data, target) in enumerate(loader):
         if data.size()[0] != args.batch_size:
             continue
-        data, target = Variable(data.cuda()), Variable(target.cuda())
+        data, target = data.cuda(), target.cuda()
         # update discriminator
         for _ in range(args.disc_iters):
-            z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
+            z = torch.randn(args.batch_size, args.Z_dim).cuda()
             optim_disc.zero_grad()
             optim_gen.zero_grad()
             # import pdb; pdb.set_trace()
@@ -94,18 +93,18 @@ def train(epoch):
             elif args.loss == 'wasserstein':
                 disc_loss = -discriminator(data, target).mean() + discriminator(generator(z, target), target).mean()
             else:
-                disc_loss = nn.BCEWithLogitsLoss()(discriminator(data, target), Variable(torch.ones(args.batch_size, 1).cuda())) + \
-                    nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.zeros(args.batch_size, 1).cuda()))
+                disc_loss = nn.BCEWithLogitsLoss()(discriminator(data, target), torch.ones(args.batch_size, 1).cuda()) + \
+                    nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), torch.zeros(args.batch_size, 1).cuda())
             disc_loss.backward()
             optim_disc.step()
-        z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
+        z = torch.randn(args.batch_size, args.Z_dim).cuda()
         # update generator
         optim_disc.zero_grad()
         optim_gen.zero_grad()
         if args.loss == 'hinge' or args.loss == 'wasserstein':
             gen_loss = -discriminator(generator(z, target), target).mean()
         else:
-            gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), Variable(torch.ones(args.batch_size, 1).cuda()))
+            gen_loss = nn.BCEWithLogitsLoss()(discriminator(generator(z, target), target), torch.ones(args.batch_size, 1).cuda())
         gen_loss.backward()
         optim_gen.step()
         if batch_idx % 100 == 0:
@@ -117,7 +116,7 @@ def train(epoch):
     scheduler_d.step()
     scheduler_g.step()
 
-fixed_z = Variable(torch.randn(args.batch_size, args.Z_dim).cuda())
+fixed_z = torch.randn(args.batch_size, args.Z_dim).cuda()
 fixed_labels = torch.from_numpy(np.tile(np.arange(10), args.batch_size//10 + 1)[:args.batch_size]).cuda()
 
 

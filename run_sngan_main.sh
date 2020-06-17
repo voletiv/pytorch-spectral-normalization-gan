@@ -3,40 +3,24 @@
 #SBATCH --cpus-per-task=10                # Ask for _ CPUs
 #SBATCH --gres=gpu:1                     # Ask for _ GPU
 #SBATCH --mem=47G                        # Ask for _GB of RAM
-#SBATCH --time=20:00:00                  # The job will run for _ hours
+#SBATCH --time=10:00:00                  # The job will run for _ hours
 #SBATCH -o /scratch/voletivi/slurm-sngan-%j.out  # Write the log in $SCRATCH
 
 norm='batch'
-save='/home/voletivi/scratch/sngan_christiancosgrove_cifar10/exp'
+loss='hinge'
+save='/home/voletivi/scratch/sngan_christiancosgrove_cifar10/exp_hinge'
 
-bs=256
+bs=512
 diters=5
 lr=0.0002
-beta1=0.0
-beta2=0.9
-sn="False"
-exp="False"
-
-# bs=256
-# diters=1
-# lr=0.0002
-# beta1=0.0
-# beta2=0.9
-
-# bs=256
-# diters=1
-# lr=0.0002
-# beta1=0.5
-# beta2=0.999
-
-# bs=256
-# diters=5
-# lr=0.0002
-# beta1=0.5
-# beta2=0.999
+beta1=0.5
+beta2=0.999
+sn_d="True"
+sn_g="False"
+exp="True"
 
 epochs=1000
-gsize=256
+gsize=128
 dsize=128
 
 export HOME=`getent passwd $USER | cut -d':' -f6`
@@ -64,10 +48,11 @@ python main.py \
         --lr $lr \
         --beta1 $beta1 \
         --beta2 $beta2 \
-        --sn $sn \
+        --sn_d $sn_d \
+        --sn_g $sn_g \
         --exp_schedule $exp \
         --norm $norm \
         --model 'resnet' \
-        --loss 'hinge'
+        --loss $loss
 
 date

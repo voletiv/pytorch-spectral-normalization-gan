@@ -299,7 +299,7 @@ def CAS_train_model(dataloaders, save_dir="./cifar10_classifier", device=torch.d
     return best_acc
 
 
-def calc_IS_FID_for_CIFAR10(cifar10_data_path, per_class=False, check=False):
+def calc_IS_FID_for_CIFAR10(cifar10_data_path='/home/voletivi/scratch/Datasets/CIFAR10', per_class=False, check=False):
     import torch
     import tqdm
     from torchvision import datasets, transforms
